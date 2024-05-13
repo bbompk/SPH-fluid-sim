@@ -1,3 +1,51 @@
 body {
     margin: 0;
 }
+
+.my-ui {
+    position: fixed;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+
+}
+
+#reset-btn {
+    background-color: #36a8f4;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    height: 50px;
+    width: 120px;
+}
+
+#reset-btn:hover {
+    background-color: white;
+    color: black;
+}
+
+#toggle-btn {
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    height: 50px;
+    width: 120px;
+}
+
+.paused {
+    background-color: #0cac2f;
+}
+
+.unpaused {
+    background-color: #f27d2f;
+}
+
+#toggle-btn:hover {
+    background-color: white;
+    color: black;
+}
