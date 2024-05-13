@@ -94,6 +94,8 @@ plane.position.set( 0, 0, -1 );
 
 const particles = [];
 const densities = new Array(NUM_PARTICLES).fill(0);
+const positions = new Array(NUM_PARTICLES).fill(new THREE.Vector3(0));
+const velocities = new Array(NUM_PARTICLES).fill(new THREE.Vector3(0));
 const predictedPositions = new Array(NUM_PARTICLES).fill(new THREE.Vector3(0));
 var spatialLookupTable = (new Array(NUM_PARTICLES).fill(0)).map(() => new THREE.Vector2(0));
 var spatialTableStartIndices = new Array(NUM_PARTICLES).fill(-1);
@@ -108,6 +110,8 @@ for (let i = -halfx; i <= halfx; i++) {
         const particle = new Particle( new THREE.Vector3( i * PARTICLE_RADIUS * 2, j * PARTICLE_RADIUS * 2, 0 ) );
         scene.add( particle.sceneObject );
         particles.push( particle );
+        positions[pidx] = particle.position.clone();
+        velocities[pidx] = particle.velocity.clone();
         pidx++;
     }
 }
@@ -129,7 +133,7 @@ function updateSpatialLookupTable() {
 
     spatialTableStartIndices = new Array(spatialGridSize).fill(-1);
     for (let i = 0; i < NUM_PARTICLES; i++) {
-        const pos = particles[i].position.clone();
+        const pos = positions[i].clone();
         const cellCoord = getCellCoord(pos);
         const hash = getCellHash(cellCoord);
         const cellKey = hash % (spatialGridSize);
@@ -170,7 +174,7 @@ function getParticleIndexesInRadius(samplePoint) {
         for (let i = startIdx; i < spatialLookupTable.length; i++) {
             if (spatialLookupTable[i].y != cellKey) break;
             const idx = spatialLookupTable[i].x;
-            const dst = particles[idx].position.distanceTo(samplePoint);
+            const dst = positions[idx].distanceTo(samplePoint);
             if (dst < options.smoothingRadius) indices.push(idx);
         }
     })
@@ -181,16 +185,16 @@ function resolveCollisions(i) {
     let halfBound = new THREE.Vector2(BOUND_X/2, BOUND_Y/2);
     halfBound.subVectors(halfBound, new THREE.Vector2(PARTICLE_RADIUS, PARTICLE_RADIUS));
 
-    let dirX = Math.sign(particles[i].position.x);
-    let dirY = Math.sign(particles[i].position.y);
+    let dirX = Math.sign(positions[i].x);
+    let dirY = Math.sign(positions[i].y);
 
-    if (Math.abs(particles[i].position.x) > halfBound.x) {
-        particles[i].position.x = halfBound.x * dirX;
-        particles[i].velocity.x = -particles[i].velocity.x * options.collisionDamping;
+    if (Math.abs(positions[i].x) > halfBound.x) {
+        positions[i].x = halfBound.x * dirX;
+        velocities[i].x = -velocities[i].x * options.collisionDamping;
     }
-    if (Math.abs(particles[i].position.y) > halfBound.y) {
-        particles[i].position.y = halfBound.y * dirY;
-        particles[i].velocity.y = -particles[i].velocity.y * options.collisionDamping;
+    if (Math.abs(positions[i].y) > halfBound.y) {
+        positions[i].y = halfBound.y * dirY;
+        velocities[i].y = -velocities[i].y * options.collisionDamping;
     }
 }
 
@@ -217,9 +221,9 @@ function calculateDensity(samplePoint) {
     }
 
     particlesInRadius.forEach(i => {
-        const d = samplePoint.distanceTo(particles[i].position);
+        const d = samplePoint.distanceTo(positions[i]);
         const influence = smoothingKernel(options.smoothingRadius, d);
-        density += influence * particles[i].mass;
+        density += influence * options.particleMass;
     })
     return density;
 }
@@ -242,7 +246,7 @@ function calculateSharedPressure(densityA, densityB) {
 
 function calculatePressureForce(particleIdx) {
     let pressureForce = new THREE.Vector3();
-    const samplePoint = particles[particleIdx].position.clone();
+    const samplePoint = positions[particleIdx].clone();
     let particlesInRadius = getParticleIndexesInRadius(samplePoint);
 
     if (!options.useSpatialGridLookup) {
@@ -252,15 +256,15 @@ function calculatePressureForce(particleIdx) {
     particlesInRadius.forEach(i => {
         if (i === particleIdx) return;
 
-        const dst = particles[i].position.distanceTo(samplePoint);
+        const dst = positions[i].distanceTo(samplePoint);
         let dir = new THREE.Vector3();
         if (dst === 0) dir = getRandomDirection();
-        else dir = particles[i].position.clone().sub(samplePoint).multiplyScalar(1/dst);
+        else dir = positions[i].clone().sub(samplePoint).multiplyScalar(1/dst);
         
         const slope = smoothingKernelDerivative(dst, options.smoothingRadius);
         const density = densities[i];
         const sharedPressure = calculateSharedPressure(density, densities[particleIdx])
-        pressureForce.add(dir.clone().multiplyScalar(sharedPressure * slope * particles[i].mass / density))
+        pressureForce.add(dir.clone().multiplyScalar(sharedPressure * slope * options.particleMass / density))
     })
 
     return pressureForce;
@@ -272,8 +276,8 @@ function update(delta) {
 
     // apply gravity and calculate densities
     for (let i=0; i < NUM_PARTICLES; i++) {
-        particles[i].velocity.add( new THREE.Vector3( 0, -options.gravity * delta, 0 ) );
-        densities[i] = calculateDensity(particles[i].position);
+        velocities[i].add( new THREE.Vector3( 0, -options.gravity * delta, 0 ) );
+        densities[i] = calculateDensity(positions[i]);
     }
 
     // calculate pressure forces
@@ -281,15 +285,15 @@ function update(delta) {
         const pressureForce = calculatePressureForce(i);
         // a = F / m
         const acceleration = pressureForce.multiplyScalar(1/densities[i]);
-        particles[i].velocity.add(acceleration.clone().multiplyScalar(delta));
+        velocities[i].add(acceleration.clone().multiplyScalar(delta));
     }
 
     // update positions and resolve collisions
     for (let i = 0; i < NUM_PARTICLES; i++) {
-        particles[i].position.add( particles[i].velocity.clone().multiplyScalar( delta ) );
+        positions[i].add( velocities[i].clone().multiplyScalar( delta ) );
         resolveCollisions(i);
 
-        particles[i].sceneObject.position.set( particles[i].position.x, particles[i].position.y, particles[i].position.z );
+        particles[i].sceneObject.position.set( positions[i].x, positions[i].y, positions[i].z );
     }
 }
 
