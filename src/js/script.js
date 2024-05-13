@@ -1,8 +1,5 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import dat from 'dat.gui';
-
-const clock = new THREE.Clock();
 
 renderer = new THREE.WebGLRenderer();
 renderer.setSize( window.innerWidth, window.innerHeight );
@@ -11,28 +8,29 @@ document.body.appendChild( renderer.domElement );
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
 
-camera.position.set( 0, 0, 11 )
+camera.position.set( 0, 0, 7 )
 
 const datgui = new dat.GUI();
 
-const MAX_WIDTH = 24;
-const MAX_HEIGHT = 16;
+const MAX_WIDTH = 16;
+const MAX_HEIGHT = 9;
 
 const PARTICLE_DIV = 10;
-const PARTICLE_RADIUS = 0.1;
-const NUM_PARTICLES = 1600;
+const PARTICLE_RADIUS = 0.05;
+const NUM_PARTICLES = 2000;
 const PARTICLE_INIT_WIDTH = 40;
 if (PARTICLE_DIV < 3) throw new Error('PARTICLE_DIV must be greater than 2');
 
 // serializable options
 const options = {
-    gravity: 5,
+    gravity: 0,
     collisionDamping: 0.85,
-    smoothingRadius: 0.35,
+    smoothingRadius: 0.45,
     particleMass: 1,
-    targetDensity: 1.2,
-    pressureMultiplier: 32,
+    targetDensity: 6.7,
+    pressureMultiplier: 11,
     useSpatialGridLookup: true,
+    viscosityStrength: 0.2,
     boundV: MAX_HEIGHT,
     boundH: MAX_WIDTH
 }
@@ -44,15 +42,15 @@ var paused = true;
 
 datgui.add(options, 'gravity', 0, 20)
 datgui.add(options, 'collisionDamping', 0, 1)
-datgui.add(options, 'smoothingRadius', 0.05, 5).onChange(() => {
+datgui.add(options, 'smoothingRadius', 0.1, 2).onChange(() => {
     spatialGridRows = Math.ceil(options.boundV / options.smoothingRadius);
-    spatialGridCols = Math.ceil(opitons.boundH / options.smoothingRadius);
-    console.log(spatialGridRows, spatialGridCols);
+    spatialGridCols = Math.ceil(options.boundH / options.smoothingRadius);
 })
 datgui.add(options, 'particleMass', 0.1, 10)
 datgui.add(options, 'targetDensity', 0.1, 30)
 datgui.add(options, 'pressureMultiplier', 0.1, 200)
 datgui.add(options, 'useSpatialGridLookup')
+datgui.add(options, 'viscosityStrength', 0, 2)
 datgui.add(options, 'boundV', 2, MAX_HEIGHT, 1)
 datgui.add(options, 'boundH', 2, MAX_WIDTH, 1)
 
@@ -103,10 +101,28 @@ class Particle {
 }
 
 const planeGeometry = new THREE.PlaneGeometry( MAX_WIDTH, MAX_HEIGHT );
-const planeMat = new THREE.MeshBasicMaterial( { color: 0xEFEFEF, side: THREE.DoubleSide } );
+const planeMat = new THREE.MeshBasicMaterial( { color: 0x000000 } );
 const plane = new THREE.Mesh( planeGeometry, planeMat );
-//scene.add( plane );
-plane.position.set( 0, 0, -1 );
+scene.add( plane );
+plane.position.set( 0, 0, 0 );
+
+var interactPoint = null;
+
+const mousePosition = new THREE.Vector2(0, 0);
+var mouseDown = false;
+window.addEventListener('mousemove', (e) => {
+    mousePosition.x = ( e.clientX / window.innerWidth ) * 2 - 1;
+    mousePosition.y = - ( e.clientY / window.innerHeight ) * 2 + 1;
+});
+window.addEventListener('mousedown', () => {
+    mouseDown = true;
+});
+window.addEventListener('mouseup', () => {
+    mouseDown = false;
+    interactPoint = null;
+});
+
+const raycaster = new THREE.Raycaster();
 
 var particles = [];
 const densities = new Array(NUM_PARTICLES).fill(0);
@@ -239,6 +255,11 @@ function smoothingKernel(radius, dist) {
     return (radius - dist) * (radius -dist) / vol;
 }
 
+function viscositySmoothingKernel(dst, radius) {
+    const value = Math.max(0, radius * radius - dst * dst);
+    return value * value * value;
+}
+
 function smoothingKernelDerivative(dist, radius) {
     if (dist >= radius) return 0
     
@@ -304,13 +325,40 @@ function calculatePressureForce(particleIdx) {
     return pressureForce;
 }
 
+function calculateViscosityForce(particleIdx) {
+    let viscosityForce = new THREE.Vector3();
+    const samplePoint = predictedPositions[particleIdx].clone();
+
+    let particlesInRadius = getParticleIndexesInRadius(samplePoint);
+    if (!options.useSpatialGridLookup) {
+        particlesInRadius = [...Array(NUM_PARTICLES).keys()];
+    }
+
+    particlesInRadius.forEach(i => {
+        if (i === particleIdx) return;
+        const dst = predictedPositions[i].distanceTo(samplePoint);
+        const influence = viscositySmoothingKernel(dst, options.smoothingRadius);
+        viscosityForce.add(velocities[i].clone().sub(velocities[particleIdx]).multiplyScalar(influence * options.particleMass));
+    })
+
+    return viscosityForce * options.viscosityStrength;
+}
+
+function interpolateColor(c0, c1, f){
+    c0 = c0.replace("#", "")
+    c1 = c1.replace("#", "")
+    c0 = c0.match(/.{1,2}/g).map((oct)=>parseInt(oct, 16) * (1-f))
+    c1 = c1.match(/.{1,2}/g).map((oct)=>parseInt(oct, 16) * f)
+    let ci = [0,1,2].map(i => Math.min(Math.round(c0[i]+c1[i]), 255))
+    return ci.reduce((a,v) => ((a << 8) + v), 0).toString(16).padStart(6, "0")
+}
 
 function update(delta) {
 
     // apply gravity and calculate densities
     for (let i=0; i < NUM_PARTICLES; i++) {
         velocities[i].add( new THREE.Vector3( 0, -options.gravity * delta, 0 ) );
-        predictedPositions[i] = positions[i].clone().add( velocities[i].clone().multiplyScalar( 1 / 60.0 ) );
+        predictedPositions[i] = positions[i].clone().add( velocities[i].clone().multiplyScalar( 1 / 120.0 ) );
     }
 
     updateSpatialLookupTable();
@@ -323,9 +371,12 @@ function update(delta) {
     // calculate pressure forces
     for (let i=0; i < NUM_PARTICLES; i++) {
         const pressureForce = calculatePressureForce(i);
+        //const viscosityForce = calculateViscosityForce(i);
+        //pressureForce.add(viscosityForce);
         // a = F / m
         const acceleration = pressureForce.multiplyScalar(1/densities[i]);
         velocities[i].add(acceleration.clone().multiplyScalar(delta));
+
     }
 
     // update positions and resolve collisions
@@ -334,6 +385,11 @@ function update(delta) {
         resolveCollisions(i);
 
         particles[i].sceneObject.position.set( positions[i].x, positions[i].y, positions[i].z );
+
+        const maxVelocity = 9;
+        const f = Math.min(Math.max(velocities[i].length() / maxVelocity, 0), 1);
+        const color = interpolateColor("#22DDFF", "#AA00FF", f);
+        particles[i].sceneObject.material.color.set("#" + color);
     }
 }
 
@@ -355,6 +411,17 @@ function step(now) {
     if (paused) return;
 
     labels.fps = 1 / delta;
+
+    if (mouseDown) {
+        raycaster.setFromCamera( mousePosition, camera );
+        const intersects = raycaster.intersectObjects([plane]);
+        if (intersects.length > 0) {
+            console.log(intersects[0].point);
+            interactPoint = intersects[0].point.clone();
+        } else {
+            interactPoint = null;
+        }
+    }
     
     if (!isNaN(delta)) update(delta);
     renderer.render( scene, camera );
