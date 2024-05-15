@@ -10,6 +10,7 @@ const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.inner
 
 camera.position.set( 0, 0, 7 )
 
+
 const datgui = new dat.GUI();
 
 const MAX_WIDTH = 16;
@@ -21,8 +22,17 @@ const NUM_PARTICLES = 1600;
 const PARTICLE_INIT_WIDTH = 40;
 if (PARTICLE_DIV < 3) throw new Error('PARTICLE_DIV must be greater than 2');
 
+var state = {
+
+}
+const setState = (partial) => {
+    state = { ...state, ...partial };
+}
+
 // serializable options
 const options = {
+    particleRadius: 0.05,
+    particleOpacity: 1,
     gravity: 5,
     collisionDamping: 0.85,
     smoothingRadius: 0.35,
@@ -34,10 +44,17 @@ const options = {
     interactionStrength: 330,
     interactionRadius: 6.3,
     boundV: MAX_HEIGHT,
-    boundH: MAX_WIDTH
+    boundH: MAX_WIDTH,
+    gradientSlowColor: "#22DDFF",
+    gradientFastColor: "#AA00FF",
+    gravityAffectsBall: false,
+    ballMass: 80,
+    slopeSize: 0.0
 }
 
 const tankPreset = {
+    particleRadius: 0.1,
+    particleOpacity: 0.8,
     gravity: 5,
     collisionDamping: 0.85,
     smoothingRadius: 0.35,
@@ -49,10 +66,17 @@ const tankPreset = {
     interactionStrength: 330,
     interactionRadius: 6.3,
     boundV: MAX_HEIGHT,
-    boundH: MAX_WIDTH
+    boundH: MAX_WIDTH,
+    gradientSlowColor: "#22DDFF",
+    gradientFastColor: "#AA00FF",
+    gravityAffectsBall: false,
+    ballMass: 1,
+    slopeSize: 0.0
 }
 
 const platePreset = {
+    particleRadius: 0.05,
+    particleOpacity: 1,
     gravity: 0,
     collisionDamping: 0.85,
     smoothingRadius: 0.35,
@@ -64,7 +88,19 @@ const platePreset = {
     interactionStrength: 250,
     interactionRadius: 2.8,
     boundV: MAX_HEIGHT,
-    boundH: MAX_WIDTH
+    boundH: MAX_WIDTH,
+    gradientSlowColor: "#22DDFF",
+    gradientFastColor: "#AA00FF",
+    gravityAffectsBall: false,
+    ballMass: 1,
+    slopeSize: 0.0
+}
+
+
+const particleUniforms = {
+    uParticleRadius: { value: options.particleRadius },
+    uParticleDivisions: { value: PARTICLE_DIV },
+    uOpacity: { value: 1.0 },
 }
 
 // variables
@@ -72,6 +108,12 @@ var spatialGridRows = Math.ceil(options.boundV/ options.smoothingRadius);
 var spatialGridCols = Math.ceil(options.boundH / options.smoothingRadius);
 var paused = true;
 
+datgui.add(options, 'particleRadius', 0.01, 0.5).onChange(() => {
+    particleUniforms.uParticleRadius.value = options.particleRadius;
+})
+datgui.add(options, 'particleOpacity', 0, 1).onChange(() => {
+    particleUniforms.uOpacity.value = options.particleOpacity;
+})
 datgui.add(options, 'gravity', 0, 20)
 datgui.add(options, 'collisionDamping', 0, 1)
 datgui.add(options, 'smoothingRadius', 0.1, 1).onChange(() => {
@@ -86,6 +128,13 @@ datgui.add(options, 'interactionStrength', 100, 1000)
 datgui.add(options, 'interactionRadius', 0, 10)
 datgui.add(options, 'boundV', 2, MAX_HEIGHT, 1)
 datgui.add(options, 'boundH', 2, MAX_WIDTH, 1)
+datgui.addColor(options, 'gradientSlowColor')
+datgui.addColor(options, 'gradientFastColor')
+datgui.add(options, 'gravityAffectsBall')
+datgui.add(options, 'ballMass', 1, 600)
+datgui.add(options, 'slopeSize', 0, 100).onChange(() => {
+    setSlopeSize(options.slopeSize * options.boundH / 100);
+})
 
 function pause(forcePause = false) {
     paused = !paused;
@@ -103,56 +152,39 @@ function pause(forcePause = false) {
 
 const toggleBtn = document.getElementById('toggle-btn')
 toggleBtn.onclick = () => {
+    
     pause();
 }
 
 const tankBtn = document.getElementById('tank-preset-btn');
 tankBtn.onclick = () => {
     Object.assign(options, tankPreset);
-    reset();
     datgui.updateDisplay();
+    particleUniforms.uParticleRadius.value = options.particleRadius;
+    particleUniforms.uOpacity.value = options.particleOpacity;
+    setSlopeSize(options.slopeSize * options.boundH / 100);
+    reset();
 }
 
 const plateBtn = document.getElementById('plate-preset-btn');
 plateBtn.onclick = () => {
     Object.assign(options, platePreset);
-    reset();
     datgui.updateDisplay();
+    particleUniforms.uParticleRadius.value = options.particleRadius;
+    particleUniforms.uOpacity.value = options.particleOpacity;
+    setSlopeSize(options.slopeSize * options.boundH / 100);
+    reset();
 }
 
-class Particle {
-    constructor(pos) {
-        const particleGeometry = new THREE.BufferGeometry();
-        let particleVertices = []
-        let particleIndices = []
-        particleVertices.push( 0, 0, 0 );
-        for (let i = 0; i < PARTICLE_DIV; i++) {
-            const angle = Math.PI * 2 * i / PARTICLE_DIV;
-            particleVertices.push( Math.cos( angle ) * PARTICLE_RADIUS, Math.sin( angle ) * PARTICLE_RADIUS, 0 );
-            particleIndices.push( 0, i + 1, (i + 1) % PARTICLE_DIV + 1 );
-        }
-        particleVertices = new Float32Array( particleVertices );
-        particleGeometry.setIndex( particleIndices );
-        particleGeometry.setAttribute( 'position', new THREE.BufferAttribute( particleVertices, 3 ) );
-        const particleMat = new THREE.MeshBasicMaterial( { color: 0x0033ff } );
-        const particle = new THREE.Mesh( particleGeometry, particleMat );
-        particle.position.set( pos.x, pos.y, pos.z );
-
-        this.sceneObject = particle;
-        this.position = new THREE.Vector3( pos.x, pos.y, pos.z );
-        this.velocity = new THREE.Vector3( 0, 0, 0 );
-        this.mass = options.particleMass;
-        this.density = 0;
-    }
+const resetBtn = document.getElementById('reset-btn');
+resetBtn.onclick = () => {
+    reset();
+    pause(true);
 }
-
-const planeGeometry = new THREE.PlaneGeometry( MAX_WIDTH, MAX_HEIGHT );
-const planeMat = new THREE.MeshBasicMaterial( { color: 0x000000 } );
-const plane = new THREE.Mesh( planeGeometry, planeMat );
-scene.add( plane );
-plane.position.set( 0, 0, 0 );
 
 var interactPoint = null;
+var ballPickupPoint = null;
+var interactionFocus = null;
 
 const mousePosition = new THREE.Vector2(0, 0);
 var mouseDown = false;
@@ -166,9 +198,131 @@ window.addEventListener('mousedown', () => {
 window.addEventListener('mouseup', () => {
     mouseDown = false;
     interactPoint = null;
+    ballPickupPoint = null;
+    interactionFocus = null;
 });
 
 const raycaster = new THREE.Raycaster();
+
+class Particle {
+    constructor(pos) {
+        const particleGeometry = new THREE.BufferGeometry();
+        let particleVertices = []
+        let particleRadialIndexes = []
+        let particleIndices = []
+        particleVertices.push( 0, 0, 0 );
+        particleRadialIndexes.push(-1);
+        for (let i = 0; i < PARTICLE_DIV; i++) {
+            particleVertices.push(0, 0, 0)
+            particleRadialIndexes.push(i);
+            particleIndices.push( 0, i + 1, (i + 1) % PARTICLE_DIV + 1 );
+        }
+        particleGeometry.setIndex( particleIndices );
+        particleGeometry.setAttribute( 'position', new THREE.BufferAttribute( new Float32Array(particleVertices), 3 ) );
+        particleGeometry.setAttribute( 'aRadialIndex', new THREE.BufferAttribute( new Int32Array(particleRadialIndexes), 1 ) );
+
+        const particleMaterial = new THREE.ShaderMaterial({
+            vertexShader: document.getElementById('particle-vertex-shader').textContent,
+            fragmentShader: document.getElementById('particle-fragment-shader').textContent,
+            uniforms: {
+                uColor: { value: new THREE.Color( 0x0055FF ) },
+                ...particleUniforms
+            },
+        })
+        const particle = new THREE.Mesh( particleGeometry, particleMaterial );
+        particle.position.set( pos.x, pos.y, pos.z );
+
+        this.sceneObject = particle;
+        this.position = new THREE.Vector3( pos.x, pos.y, pos.z );
+        this.velocity = new THREE.Vector3( 0, 0, 0 );
+        this.density = 0;
+    }
+}
+
+
+// Plane
+const planeGeometry = new THREE.PlaneGeometry( MAX_WIDTH, MAX_HEIGHT, MAX_WIDTH * 10, MAX_HEIGHT * 10 );
+const planeMat = new THREE.MeshBasicMaterial( { color: 0, wireframe: false } );
+const planeMaterial = new THREE.ShaderMaterial({
+    vertexShader: document.getElementById('raymarching-canvas-vertex-shader').textContent,
+    fragmentShader: document.getElementById('raymarching-canvas-fragment-shader').textContent,
+    uniforms: {
+        uCamPos: new Float32Array([0, 0, 7]),
+        uPositions: new Float32Array(NUM_PARTICLES * 3),
+        uParticleRadius: PARTICLE_RADIUS,
+    }
+
+})
+const plane = new THREE.Mesh( planeGeometry, planeMat );
+scene.add( plane );
+plane.position.set( 0, 0, 0 );
+
+
+// Ball
+const BALL_RADIUS = 0.7;
+const BALL_DIV = 20;
+const BALL_INIT_POS = new THREE.Vector3(-5, 2, 0);
+var ball = null;
+var ballPos = new THREE.Vector3(0, 0, 0);
+var ballVel = new THREE.Vector3(0, 0, 0);
+function resetBall() {
+    if (ball) scene.remove(ball);
+
+    const ballGeometry = new THREE.BufferGeometry();
+    let ballVertices = []
+    let ballIndices = []
+
+    ballVertices.push( 0, 0, 0 );
+    for (let i = 0; i < BALL_DIV; i++) {
+        const angle = Math.PI * 2 * i / BALL_DIV;
+        ballVertices.push( Math.cos( angle ) * BALL_RADIUS, Math.sin( angle ) * BALL_RADIUS, 0 );
+        ballIndices.push( 0, i + 1, (i + 1) % BALL_DIV + 1 );
+    }
+    ballVertices = new Float32Array( ballVertices );
+    ballGeometry.setIndex( ballIndices );
+    ballGeometry.setAttribute( 'position', new THREE.BufferAttribute( ballVertices, 3 ) );
+    ballMat = new THREE.MeshBasicMaterial( { color: 0xff4444, wireframe: false } );
+    ball = new THREE.Mesh( ballGeometry, ballMat );
+    ball.position.copy(BALL_INIT_POS);
+    scene.add( ball );
+    ballPos = BALL_INIT_POS.clone();
+    ballVel = new THREE.Vector3(0, 0, 0);
+}
+
+// Slope - left side slope with 45 degree angle
+var slopeSize = 4.0;
+const shape = new THREE.Shape();
+shape.moveTo( 0, 0 );
+shape.lineTo( 0, slopeSize );
+shape.lineTo( slopeSize, 0 );
+const slopeGeometry = new THREE.ShapeGeometry( shape );
+const slope = new THREE.Mesh( slopeGeometry, new THREE.MeshBasicMaterial({ color: 0, wireframe: false }) );
+scene.add( slope );
+slope.position.set( -options.boundH/2, -options.boundV/2, 0 );
+function setSlopeSize(size) {
+    slope.geometry.attributes.position.array[4] = size;
+    slope.geometry.attributes.position.array[6] = size;
+    slopeSize = size;
+}
+setSlopeSize(0)
+
+var boundFrame = null
+function drawBounds() {
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xFFFFFF });
+    const points = [
+        new THREE.Vector3(-options.boundH/2, -options.boundV/2, 0),
+        new THREE.Vector3(options.boundH/2, -options.boundV/2, 0),
+        new THREE.Vector3(options.boundH/2, options.boundV/2, 0),
+        new THREE.Vector3(-options.boundH/2, options.boundV/2, 0),
+        new THREE.Vector3(-options.boundH/2, -options.boundV/2, 0),
+        new THREE.Vector3(-options.boundH/2, -options.boundV/2 + slopeSize, 0),
+        new THREE.Vector3(-options.boundH/2 + slopeSize, -options.boundV/2, 0),
+    ]
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    if (boundFrame) scene.remove(boundFrame);
+    boundFrame = new THREE.Line(lineGeo, lineMat);
+    scene.add(boundFrame);
+}
 
 var particles = [];
 const densities = new Array(NUM_PARTICLES).fill(0);
@@ -188,6 +342,7 @@ function reset() {
     const halfx = Math.ceil(PARTICLE_INIT_WIDTH / 2);
     const halfy = Math.ceil((NUM_PARTICLES / PARTICLE_INIT_WIDTH) / 2);
     var pidx = 0;
+    const uPositions = [];
     for (let i = -halfx; i <= halfx; i++) {
         for (let j = -halfy; j <= halfy; j++) {
             if (pidx >= NUM_PARTICLES) break;
@@ -197,20 +352,21 @@ function reset() {
             positions[pidx] = particle.position.clone();
             velocities[pidx] = particle.velocity.clone();
             pidx++;
+
+            uPositions.push(particle.position.x, particle.position.y, particle.position.z);
         }
     }
 
+    resetBall();
+
     console.log(`Initialized ${particles.length} particles`)
 
+    drawBounds();
     renderer.render( scene, camera );
     pause(true);
 }
 
-const resetBtn = document.getElementById('reset-btn');
-resetBtn.onclick = () => {
-    reset();
-    pause(true);
-}
+
 
 
 
@@ -278,6 +434,21 @@ function getParticleIndexesInRadius(samplePoint) {
     return indices;
 }
 
+function isPointInTriangle(p, p1, p2, p3) {
+    const alpha = ((p2.y - p3.y)*(p.x - p3.x) + (p3.x - p2.x)*(p.y - p3.y)) / ((p2.y - p3.y)*(p1.x - p3.x) + (p3.x - p2.x)*(p1.y - p3.y));
+    const beta = ((p3.y - p1.y)*(p.x - p3.x) + (p1.x - p3.x)*(p.y - p3.y)) / ((p2.y - p3.y)*(p1.x - p3.x) + (p3.x - p2.x)*(p1.y - p3.y));
+    const gamma = 1 - alpha - beta;
+    return alpha > 0 && beta > 0 && gamma > 0;
+}
+
+function nearestPointInLine(p, a, b) {
+    dx = b.x - a.x;
+    dy = b.y - a.y;
+    det = dx*dx + dy*dy;
+    aa = ( (p.x - a.x) * dx + (p.y - a.y) * dy ) / det;
+    return new THREE.Vector2(aa * dx + a.x, aa * dy + a.y);
+}
+
 function resolveCollisions(i) {
     let halfBound = new THREE.Vector2(options.boundH/2, options.boundV/2);
     halfBound.subVectors(halfBound, new THREE.Vector2(PARTICLE_RADIUS, PARTICLE_RADIUS));
@@ -293,22 +464,84 @@ function resolveCollisions(i) {
         positions[i].y = halfBound.y * dirY;
         velocities[i].y = -velocities[i].y * options.collisionDamping;
     }
+
+    //barycentric coordinates of slopes
+    const p = new THREE.Vector2(positions[i].x, positions[i].y)
+    const p1 = new THREE.Vector2(-options.boundH/2, -options.boundV/2);
+    const p2 = new THREE.Vector2(-options.boundH/2, -options.boundV/2 + slopeSize);
+    const p3 = new THREE.Vector2(-options.boundH/2 + slopeSize, -options.boundV/2);
+    if (isPointInTriangle(p, p1, p2, p3)) {
+        const nearestPoint = nearestPointInLine(p, p2, p3);
+        positions[i].x = nearestPoint.x;
+        positions[i].y = nearestPoint.y;
+        const normal = new THREE.Vector3(1, 1, 0).normalize();
+        const dot = velocities[i].dot(normal);
+        const reflectVel = velocities[i].clone().sub(normal.clone().multiplyScalar(2 * dot));
+        velocities[i] = reflectVel.multiplyScalar(options.collisionDamping);
+    }
 }
 
-function resolvePredictedCollisions(i) {
+function resolveBallCollision(i){
+    var contactVelo = null;
+    if (positions[i].distanceTo(ballPos) < BALL_RADIUS + PARTICLE_RADIUS) {
+        const normal = positions[i].clone().sub(ballPos).normalize();
+        positions[i] = ballPos.clone().add(normal.clone().multiplyScalar(BALL_RADIUS + PARTICLE_RADIUS));
+        const dot = velocities[i].dot(normal);
+        const reflectVel = velocities[i].clone().sub(normal.clone().multiplyScalar(2 * dot));
+        contactVelo = velocities[i].clone();
+        velocities[i] = reflectVel.multiplyScalar(options.collisionDamping);
+    }
+    return contactVelo;
+}
+
+function resolveParticleBallCollision() {
+    const pressureForce = new THREE.Vector3();
+    for (let i = 0; i < BALL_DIV; i++) {
+        let samplePoint = new THREE.Vector3( Math.cos( Math.PI * 2 * i / BALL_DIV ) * BALL_RADIUS, Math.sin( Math.PI * 2 * i / BALL_DIV ) * BALL_RADIUS, 0 );
+        pressureForce.add(calculatePressureForce(-1, samplePoint, 0.1));
+    }
+    return pressureForce;
+}
+
+function isLineIntersectCircle(l1, l2, c, r) {
+    x = l1.distanceTo(l2);
+    return Math.abs(((c.x - l1.x) * (l2.y - l1.y) - (c.y - l1.y) * (l2.x - l1.x))) / x <= r;
+}
+
+function resolveBallWallCollision() {
     let halfBound = new THREE.Vector2(options.boundH/2, options.boundV/2);
-    halfBound.subVectors(halfBound, new THREE.Vector2(PARTICLE_RADIUS, PARTICLE_RADIUS));
+    halfBound.subVectors(halfBound, new THREE.Vector2(BALL_RADIUS, BALL_RADIUS));
 
-    let dirX = Math.sign(predictedPositions[i].x);
-    let dirY = Math.sign(predictedPositions[i].y);
+    let dirX = Math.sign(ballPos.x);
+    let dirY = Math.sign(ballPos.y);
 
-    if (Math.abs(predictedPositions[i].x) > halfBound.x) {
-        predictedPositions[i].x = halfBound.x * dirX;
+    if (Math.abs(ballPos.x) > halfBound.x) {
+        ballPos.x = halfBound.x * dirX;
+        ballVel.x = -ballVel.x * options.collisionDamping;
     }
-    if (Math.abs(predictedPositions[i].y) > halfBound.y) {
-        predictedPositions[i].y = halfBound.y * dirY;    
+
+    if (Math.abs(ballPos.y) > halfBound.y) {
+        ballPos.y = halfBound.y * dirY;
+        ballVel.y = -ballVel.y * options.collisionDamping;
+    }
+
+    //barycentric coordinates of slopes
+    const p = new THREE.Vector2(ballPos.x, ballPos.y)
+    const p1 = new THREE.Vector2(-options.boundH/2, -options.boundV/2);
+    const p2 = new THREE.Vector2(-options.boundH/2, -options.boundV/2 + slopeSize);
+    const p3 = new THREE.Vector2(-options.boundH/2 + slopeSize, -options.boundV/2);
+    if (isLineIntersectCircle(p2, p3, ballPos, BALL_RADIUS)) {
+        const nearestPoint = nearestPointInLine(p, p2, p3);
+        const normal = new THREE.Vector3(1, 1, 0).normalize();
+        nearestPoint.add(normal.clone().multiplyScalar(BALL_RADIUS));
+        ballPos.x = nearestPoint.x;
+        ballPos.y = nearestPoint.y;
+        const dot = ballVel.dot(normal);
+        const reflectVel = ballVel.clone().sub(normal.clone().multiplyScalar(2 * dot));
+        ballVel = reflectVel.multiplyScalar(options.collisionDamping);
     }
 }
+
 
 function smoothingKernel(radius, dist) {
     if (dist >= radius) return 0;
@@ -334,14 +567,6 @@ function smoothingKernelDerivative(dist, radius) {
     
     const scale = 12 / (Math.pow(radius, 4) * Math.PI);
     return (dist - radius) * scale;
-}
-
-function smoothingKernelDerivativeSmoothy(dist, radius) {
-    if (dist >= radius) return 0
-
-    const f = radius * radius - dist * dist;
-    const scale = -24 / (Math.pow(radius, 8) * Math.PI);
-    return f * f * scale * dist;
 }
 
 function calculateDensity(samplePoint) {
@@ -376,9 +601,10 @@ function calculateSharedPressure(densityA, densityB) {
     return (pressureA + pressureB) / 2;
 }
 
-function calculatePressureForce(particleIdx) {
+function calculatePressureForce(particleIdx, ballPoint = null, smoothingRadius = options.smoothingRadius) {
     let pressureForce = new THREE.Vector3();
-    const samplePoint = predictedPositions[particleIdx].clone();
+    var samplePoint = ballPoint ? ballPoint : predictedPositions[particleIdx].clone();
+
     let particlesInRadius = getParticleIndexesInRadius(samplePoint);
 
     if (!options.useSpatialGridLookup) {
@@ -393,9 +619,10 @@ function calculatePressureForce(particleIdx) {
         if (dst === 0) dir = getRandomDirection();
         else dir = predictedPositions[i].clone().sub(samplePoint).multiplyScalar(1/dst);
         
-        const slope = smoothingKernelDerivative(dst, options.smoothingRadius);
+        const slope = smoothingKernelDerivative(dst, smoothingRadius);
         const density = densities[i];
-        const sharedPressure = calculateSharedPressure(density, densities[particleIdx])
+        const otherDensity = ballPoint ? options.targetDensity : densities[particleIdx]
+        const sharedPressure = calculateSharedPressure(density, otherDensity)
         pressureForce.add(dir.clone().multiplyScalar(sharedPressure * slope * options.particleMass / density))
     })
 
@@ -445,6 +672,8 @@ function interpolateColor(c0, c1, f){
     return ci.reduce((a,v) => ((a << 8) + v), 0).toString(16).padStart(6, "0")
 }
 
+
+
 function update(delta) {
 
     // apply gravity and calculate densities
@@ -478,22 +707,42 @@ function update(delta) {
         velocities[i].add(viscosityAcceleration.clone().multiplyScalar(delta));
     }
 
+    ballIncomingParticleVelos = [];
+
     // update positions and resolve collisions
     for (let i = 0; i < NUM_PARTICLES; i++) {
         positions[i].add( velocities[i].clone().multiplyScalar( delta ) );
         resolveCollisions(i);
+        contactVelo = resolveBallCollision(i);
+        if (contactVelo) ballIncomingParticleVelos.push(contactVelo.clone());
 
         particles[i].sceneObject.position.set( positions[i].x, positions[i].y, positions[i].z );
 
-        const maxVelocity = 9;
+        const maxVelocity = 4.5;
         const f = Math.min(Math.max(velocities[i].length() / maxVelocity, 0), 1);
-        const color = interpolateColor("#22DDFF", "#AA00FF", f);
-        particles[i].sceneObject.material.color.set("#" + color);
+        const color = interpolateColor(options.gradientSlowColor, options.gradientFastColor, f);
+        particles[i].sceneObject.material.uniforms.uColor.value = new THREE.Color(`#${color}`);
     }
+
+    // update ball position
+    if (options.gravityAffectsBall) ballVel.add(new THREE.Vector3(0, -options.gravity * delta, 0));
+    // const particleForce = resolveParticleBallCollision(ballIncomingParticleVelos);
+    // const particleForceAcceleration = particleForce.multiplyScalar(1/options.ballMass);
+    // ballVel.add(particleForceAcceleration.clone().multiplyScalar(delta));
+    ballPos.add(ballVel.clone().multiplyScalar(delta));
+    if (ballPickupPoint) {
+        ballPos = ballPickupPoint.clone().setZ(0);
+        ballVel = new THREE.Vector3(0, 0, 0);
+    }
+    resolveBallWallCollision();
+    ball.position.set(ballPos.x, ballPos.y, ballPos.z);
 }
 
 updateSpatialLookupTable();
 
+var accumDelta = 0;
+var frameCount = 0;
+const fpsRefreshRate = 1;
 var labels = {
     fps: 0
 }
@@ -509,19 +758,34 @@ function step(now) {
 
     if (paused) return;
 
-    labels.fps = 1 / delta;
+    accumDelta += delta;
+    frameCount++;
+    if (accumDelta >= fpsRefreshRate) {
+        labels.fps = frameCount * accumDelta;
+        frameCount = 0;
+        accumDelta = 0;
+    }
 
     if (mouseDown) {
         raycaster.setFromCamera( mousePosition, camera );
-        const intersects = raycaster.intersectObjects([plane]);
+        const intersects = raycaster.intersectObjects([ball, plane]);
         if (intersects.length > 0) {
-            interactPoint = intersects[0].point.clone();
+            if(intersects.length > 1 && (interactionFocus === "ball" || !interactionFocus)) {
+                ballPickupPoint = intersects[0].point.clone();
+                interactionFocus = "ball"
+            } else if (interactionFocus === "plane" || !interactionFocus){
+                ballPickupPoint = null;
+                interactPoint = intersects[0].point.clone();
+                interactionFocus = "plane"
+            }
         } else {
+            ballPickupPoint = null;
             interactPoint = null;
         }
     }
     
     if (!isNaN(delta)) update(delta);
+    drawBounds();
     renderer.render( scene, camera );
 }
 
