@@ -48,7 +48,8 @@ const options = {
     gradientSlowColor: "#22DDFF",
     gradientFastColor: "#AA00FF",
     gravityAffectsBall: false,
-    ballMass: 80,
+    ballMass: 1,
+    ballDensity: 1,
     slopeSize: 0.0
 }
 
@@ -131,7 +132,8 @@ datgui.add(options, 'boundH', 2, MAX_WIDTH, 1)
 datgui.addColor(options, 'gradientSlowColor')
 datgui.addColor(options, 'gradientFastColor')
 datgui.add(options, 'gravityAffectsBall')
-datgui.add(options, 'ballMass', 1, 600)
+datgui.add(options, 'ballMass', 0.1, 2)
+datgui.add(options, 'ballDensity', 0.1, 50)
 datgui.add(options, 'slopeSize', 0, 100).onChange(() => {
     setSlopeSize(options.slopeSize * options.boundH / 100);
 })
@@ -367,9 +369,6 @@ function reset() {
 }
 
 
-
-
-
 function getCellCoord(pos) {
     return new THREE.Vector2(Math.floor(pos.x / options.smoothingRadius), Math.floor(pos.y / options.smoothingRadius));
 }
@@ -482,26 +481,35 @@ function resolveCollisions(i) {
     }
 }
 
-function resolveBallCollision(i){
-    var contactVelo = null;
+function resolveBallCollision(positions, i, predict=false){
+    var contact = false;
     if (positions[i].distanceTo(ballPos) < BALL_RADIUS + PARTICLE_RADIUS) {
         const normal = positions[i].clone().sub(ballPos).normalize();
         positions[i] = ballPos.clone().add(normal.clone().multiplyScalar(BALL_RADIUS + PARTICLE_RADIUS));
         const dot = velocities[i].dot(normal);
         const reflectVel = velocities[i].clone().sub(normal.clone().multiplyScalar(2 * dot));
-        contactVelo = velocities[i].clone();
-        velocities[i] = reflectVel.multiplyScalar(options.collisionDamping);
+        contact = true;
+        if(!predict) velocities[i] = reflectVel.multiplyScalar(options.collisionDamping);
     }
-    return contactVelo;
+    return contact;
 }
 
-function resolveParticleBallCollision() {
-    const pressureForce = new THREE.Vector3();
-    for (let i = 0; i < BALL_DIV; i++) {
-        let samplePoint = new THREE.Vector3( Math.cos( Math.PI * 2 * i / BALL_DIV ) * BALL_RADIUS, Math.sin( Math.PI * 2 * i / BALL_DIV ) * BALL_RADIUS, 0 );
-        pressureForce.add(calculatePressureForce(-1, samplePoint, 0.1));
+function resolveParticleBallCollision(contactPoints, incomingVelo) {
+    const force = new THREE.Vector3();
+    // for (let i = 0; i < BALL_DIV; i++) {
+    //     let samplePoint = new THREE.Vector3( Math.cos( Math.PI * 2 * i / BALL_DIV ) * BALL_RADIUS + ballPos.x, Math.sin( Math.PI * 2 * i / BALL_DIV ) * BALL_RADIUS + ballPos.y, 0 );
+    //     const dirToCenter = ballPos.clone().sub(samplePoint).normalize();    
+    //     const pressureForce = calculatePressureForce(-1, samplePoint, 0.5);
+    //     force.add(pressureForce)
+    // }
+    // force.divideScalar(BALL_DIV);
+    if(contactPoints.length != incomingVelo.length) return force;
+    for(let i = 0; i < contactPoints.length; i++) {
+        const dirToCenter = ballPos.clone().sub(contactPoints[i]).normalize();
+        const veloToCenter = incomingVelo[i].clone().projectOnVector(dirToCenter);
+        force.add(veloToCenter.clone());
     }
-    return pressureForce;
+    return force;
 }
 
 function isLineIntersectCircle(l1, l2, c, r) {
@@ -622,7 +630,7 @@ function calculatePressureForce(particleIdx, ballPoint = null, smoothingRadius =
         
         const slope = smoothingKernelDerivative(dst, smoothingRadius);
         const density = densities[i];
-        const otherDensity = ballPoint ? options.targetDensity : densities[particleIdx]
+        const otherDensity = ballPoint ? options.ballDensity : densities[particleIdx]
         const sharedPressure = calculateSharedPressure(density, otherDensity)
         pressureForce.add(dir.clone().multiplyScalar(sharedPressure * slope * options.particleMass / density))
     })
@@ -630,9 +638,9 @@ function calculatePressureForce(particleIdx, ballPoint = null, smoothingRadius =
     return pressureForce;
 }
 
-function calculateViscosityForce(particleIdx) {
+function calculateViscosityForce(particleIdx, ballPoint=null, smoothingRadius = options.smoothingRadius) {
     let viscosityForce = new THREE.Vector3();
-    const samplePoint = positions[particleIdx].clone();
+    const samplePoint = ballPoint ? ballPoint : positions[particleIdx].clone();
 
     let particlesInRadius = getParticleIndexesInRadius(samplePoint);
     if (!options.useSpatialGridLookup) {
@@ -641,9 +649,10 @@ function calculateViscosityForce(particleIdx) {
 
     particlesInRadius.forEach(i => {
         if (i === particleIdx) return;
+        const targetVelo = ballPoint ? ballVel : velocities[particleIdx];
         const dst = positions[i].distanceTo(samplePoint);
         const influence = viscositySmoothingKernel(dst, options.smoothingRadius);
-        viscosityForce.add(velocities[i].clone().sub(velocities[particleIdx]).multiplyScalar(influence));
+        viscosityForce.add(velocities[i].clone().sub(targetVelo).multiplyScalar(influence));
     })
 
     return viscosityForce.multiplyScalar(options.viscosityStrength);
@@ -681,6 +690,7 @@ function update(delta) {
     for (let i=0; i < NUM_PARTICLES; i++) {
         velocities[i].add( new THREE.Vector3( 0, -options.gravity * delta, 0 ) );
         predictedPositions[i] = positions[i].clone().add( velocities[i].clone().multiplyScalar( 1 / 30.0 ) );
+        if(options.gravityAffectsBall) resolveBallCollision(predictedPositions, i, true);
     }
 
     updateSpatialLookupTable();
@@ -709,13 +719,20 @@ function update(delta) {
     }
 
     ballIncomingParticleVelos = [];
+    ballContactPoints = [];
 
     // update positions and resolve collisions
     for (let i = 0; i < NUM_PARTICLES; i++) {
         positions[i].add( velocities[i].clone().multiplyScalar( delta ) );
+
+        beforeBallCollisionPos = positions[i].clone();
+        beforeBallCollisionVelo = velocities[i].clone();
         resolveCollisions(i);
-        contactVelo = resolveBallCollision(i);
-        if (contactVelo) ballIncomingParticleVelos.push(contactVelo.clone());
+        const contact = resolveBallCollision(positions, i);
+        if (contact) {
+            ballIncomingParticleVelos.push(beforeBallCollisionVelo.clone());
+            ballContactPoints.push(positions[i].clone());
+        }
 
         particles[i].sceneObject.position.set( positions[i].x, positions[i].y, positions[i].z );
 
@@ -726,11 +743,13 @@ function update(delta) {
     }
 
     // update ball position
-    if (options.gravityAffectsBall) ballVel.add(new THREE.Vector3(0, -options.gravity * delta, 0));
-    // const particleForce = resolveParticleBallCollision(ballIncomingParticleVelos);
-    // const particleForceAcceleration = particleForce.multiplyScalar(1/options.ballMass);
-    // ballVel.add(particleForceAcceleration.clone().multiplyScalar(delta));
-    ballPos.add(ballVel.clone().multiplyScalar(delta));
+    if (options.gravityAffectsBall) {
+        ballVel.add(new THREE.Vector3(0, -options.gravity * delta, 0));
+        const particleForce = resolveParticleBallCollision(ballContactPoints, ballIncomingParticleVelos);
+        const particleForceAcceleration = particleForce.multiplyScalar(1/options.ballMass);
+        ballVel.add(particleForceAcceleration.clone().multiplyScalar(delta));
+        ballPos.add(ballVel.clone().multiplyScalar(delta));
+    }
     resolveBallWallCollision();
     ball.position.set(ballPos.x, ballPos.y, ballPos.z);
 }
