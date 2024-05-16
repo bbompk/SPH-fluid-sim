@@ -33,6 +33,11 @@ body {
     width: 120px;
 }
 
+#tank-preset-btn:hover {
+    background-color: white;
+    color: black;
+}
+
 #plate-preset-btn {
     background-color: #f898ff;
     color: rgb(65, 65, 65);
@@ -42,6 +47,11 @@ body {
     cursor: pointer;
     height: 50px;
     width: 120px;
+}
+
+#plate-preset-btn:hover {
+    background-color: white;
+    color: black;
 }
 
 #reset-btn:hover {

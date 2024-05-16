@@ -53,7 +53,7 @@ const options = {
 }
 
 const tankPreset = {
-    particleRadius: 0.1,
+    particleRadius: 0.05,
     particleOpacity: 0.8,
     gravity: 5,
     collisionDamping: 0.85,
@@ -471,10 +471,11 @@ function resolveCollisions(i) {
     const p2 = new THREE.Vector2(-options.boundH/2, -options.boundV/2 + slopeSize);
     const p3 = new THREE.Vector2(-options.boundH/2 + slopeSize, -options.boundV/2);
     if (isPointInTriangle(p, p1, p2, p3)) {
+        const normal = new THREE.Vector3(1, 1, 0).normalize();
         const nearestPoint = nearestPointInLine(p, p2, p3);
+        nearestPoint.add(normal.clone().multiplyScalar(PARTICLE_RADIUS));
         positions[i].x = nearestPoint.x;
         positions[i].y = nearestPoint.y;
-        const normal = new THREE.Vector3(1, 1, 0).normalize();
         const dot = velocities[i].dot(normal);
         const reflectVel = velocities[i].clone().sub(normal.clone().multiplyScalar(2 * dot));
         velocities[i] = reflectVel.multiplyScalar(options.collisionDamping);
@@ -730,10 +731,6 @@ function update(delta) {
     // const particleForceAcceleration = particleForce.multiplyScalar(1/options.ballMass);
     // ballVel.add(particleForceAcceleration.clone().multiplyScalar(delta));
     ballPos.add(ballVel.clone().multiplyScalar(delta));
-    if (ballPickupPoint) {
-        ballPos = ballPickupPoint.clone().setZ(0);
-        ballVel = new THREE.Vector3(0, 0, 0);
-    }
     resolveBallWallCollision();
     ball.position.set(ballPos.x, ballPos.y, ballPos.z);
 }
@@ -756,16 +753,6 @@ function step(now) {
     const delta = now - then;
     then = now;
 
-    if (paused) return;
-
-    accumDelta += delta;
-    frameCount++;
-    if (accumDelta >= fpsRefreshRate) {
-        labels.fps = frameCount * accumDelta;
-        frameCount = 0;
-        accumDelta = 0;
-    }
-
     if (mouseDown) {
         raycaster.setFromCamera( mousePosition, camera );
         const intersects = raycaster.intersectObjects([ball, plane]);
@@ -773,6 +760,9 @@ function step(now) {
             if(intersects.length > 1 && (interactionFocus === "ball" || !interactionFocus)) {
                 ballPickupPoint = intersects[0].point.clone();
                 interactionFocus = "ball"
+                ballPos = ballPickupPoint.clone().setZ(0);
+                ballVel = new THREE.Vector3(0, 0, 0);
+                ball.position.set(ballPos.x, ballPos.y, ballPos.z);
             } else if (interactionFocus === "plane" || !interactionFocus){
                 ballPickupPoint = null;
                 interactPoint = intersects[0].point.clone();
@@ -783,8 +773,19 @@ function step(now) {
             interactPoint = null;
         }
     }
-    
-    if (!isNaN(delta)) update(delta);
+
+    if (!paused) {
+        accumDelta += delta;
+        frameCount++;
+        if (accumDelta >= fpsRefreshRate) {
+            labels.fps = frameCount * accumDelta;
+            frameCount = 0;
+            accumDelta = 0;
+        }
+        
+        if (!isNaN(delta)) update(delta);
+    }
+
     drawBounds();
     renderer.render( scene, camera );
 }
