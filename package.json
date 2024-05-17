@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite src",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "vite build src --outDir ../dist"
+    "build": "vite build src --outDir ../docs"
   },
   "author": "",
   "license": "ISC",
