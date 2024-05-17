@@ -1,3 +1,6 @@
+import * as THREE from 'three';
+
+
 export function getRandomDirection() {
     return (new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, 0)).normalize();
 }

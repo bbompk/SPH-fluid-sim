@@ -49,42 +49,42 @@ if (PARTICLE_DIV < 3) throw new Error('PARTICLE_DIV must be greater than 2');
 const options = {
     particleRadius: 0.05,
     particleAlpha: 1,
-    gravity: 5,
+    gravity: 7,
     collisionDamping: 0.85,
     smoothingRadius: 0.35,
     particleMass: 1,
     targetDensity: 36,
-    pressureMultiplier: 26,
+    pressureMultiplier: 34,
     viscosityStrength: 2,
-    interactionStrength: 330,
+    interactionStrength: 530,
     interactionRadius: 6.3,
     boundV: MAX_HEIGHT,
     boundH: MAX_WIDTH,
     gradientSlowColor: "#22DDFF",
     gradientFastColor: "#AA00FF",
     applyBallPhysics: false,
-    ballMass: 0.6,
+    ballMass: 0.3,
     slopeSize: 0.0
 }
 
 const tankPreset = {
     particleRadius: 0.05,
     particleAlpha: 0.8,
-    gravity: 5,
+    gravity: 7,
     collisionDamping: 0.85,
     smoothingRadius: 0.35,
     particleMass: 1,
     targetDensity: 36,
-    pressureMultiplier: 26,
-    viscosityStrength: 2,
-    interactionStrength: 330,
+    pressureMultiplier: 34,
+    viscosityStrength: 5,
+    interactionStrength: 530,
     interactionRadius: 6.3,
     boundV: MAX_HEIGHT,
     boundH: MAX_WIDTH,
     gradientSlowColor: "#22DDFF",
     gradientFastColor: "#AA00FF",
-    applyBallPhysics: false,
-    ballMass: 0.5,
+    applyBallPhysics: true,
+    ballMass: 0.3,
     slopeSize: 0.0
 }
 
@@ -177,7 +177,7 @@ tankBtn.onclick = () => {
     datgui.updateDisplay();
     particleUniforms.uParticleRadius.value = options.particleRadius;
     particleUniforms.uOpacity.value = options.particleAlpha;
-    setSlopeSize(options.slopeSize * options.boundH / 100);
+    slopeSize = options.slopeSize * options.boundH / 100;
     reset();
 }
 
@@ -187,7 +187,7 @@ plateBtn.onclick = () => {
     datgui.updateDisplay();
     particleUniforms.uParticleRadius.value = options.particleRadius;
     particleUniforms.uOpacity.value = options.particleAlpha;
-    setSlopeSize(options.slopeSize * options.boundH / 100);
+    slopeSize = options.slopeSize * options.boundH / 100;
     reset();
 }
 
@@ -637,12 +637,12 @@ function step(delta) {
         positions[i].add( velocities[i].clone().multiplyScalar( delta ) );
 
         let beforeBallCollisionVelo = velocities[i].clone();
-        resolveParticleBoundCollisions(i);
         const contact = resolveParticleBallCollision(positions, i, true);
         if (contact) {
             ballIncomingParticleVelos.push(beforeBallCollisionVelo.clone());
             ballContactPoints.push(positions[i].clone());
         }
+        resolveParticleBoundCollisions(i);
 
         particles[i].sceneObject.position.set( positions[i].x, positions[i].y, positions[i].z );
     }
@@ -685,7 +685,8 @@ function update(now) {
 
     // delta time
     now *= 0.001;  // convert to seconds
-    const delta = now - then;
+    const delta = 1/30;
+    const trueDelta = now - then;
     then = now;
 
     // mouse interaction
@@ -712,7 +713,7 @@ function update(now) {
 
     // simulation step
     if (!paused) {
-        accumDelta += delta;
+        accumDelta += trueDelta;
         frameCount++;
         if (accumDelta >= fpsRefreshRate) {
             labels.fps = frameCount * accumDelta;
