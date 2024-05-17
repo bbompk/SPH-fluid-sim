@@ -28,15 +28,15 @@ export function isPointInTriangle(p, p1, p2, p3) {
 }
 
 export function isLineIntersectCircle(l1, l2, c, r) {
-    x = l1.distanceTo(l2);
+    const x = l1.distanceTo(l2);
     return Math.abs(((c.x - l1.x) * (l2.y - l1.y) - (c.y - l1.y) * (l2.x - l1.x))) / x <= r;
 }
 
 export function nearestPointInLine(p, a, b) {
-    dx = b.x - a.x;
-    dy = b.y - a.y;
-    det = dx*dx + dy*dy;
-    aa = ( (p.x - a.x) * dx + (p.y - a.y) * dy ) / det;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const det = dx*dx + dy*dy;
+    const aa = ( (p.x - a.x) * dx + (p.y - a.y) * dy ) / det;
     return new THREE.Vector2(aa * dx + a.x, aa * dy + a.y);
 }
 

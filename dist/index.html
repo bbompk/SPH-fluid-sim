@@ -1,0 +1,45 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Three.js</title>
+  <script type="module" crossorigin src="/assets/index-CmI2wIVB.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DiiKN6HT.css">
+</head>
+<body>
+    <div class="my-ui">
+        <button id="reset-btn">RESET</button>
+        <button id="toggle-btn" class="paused">PLAY</button>
+        <button id="tank-preset-btn">Tank Preset</button>
+        <button id="plate-preset-btn">Plate Preset</button>
+    </div>
+    <script id="particle-vertex-shader" type="vertex">
+        uniform float uParticleRadius;
+        uniform int uParticleDivisions;
+
+        attribute int aRadialIndex;
+
+        const float PI = 3.14159265359;
+
+        void main() {
+            vec3 pos = position;
+            if (aRadialIndex >= 0) {
+                float angle = float(aRadialIndex) / float(uParticleDivisions) * 2.0 * PI;
+                float radius = uParticleRadius;
+                float x = cos(angle) * radius;
+                float y = sin(angle) * radius;
+                pos = vec3(x, y, 0.0);
+            }
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+    </script>
+    <script id="particle-fragment-shader" type="fragment">
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        void main() {
+            gl_FragColor = vec4(uColor, uOpacity);
+        }
+    </script>
+</body>
+</html>

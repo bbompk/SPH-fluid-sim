@@ -16,7 +16,7 @@ import {
 
 //=================== Three.js setup ===================//
 
-renderer = new THREE.WebGLRenderer(alpha = true);
+const renderer = new THREE.WebGLRenderer();
 renderer.setSize( window.innerWidth, window.innerHeight );
 document.body.appendChild( renderer.domElement );
 
@@ -279,7 +279,7 @@ function resetBall() {
     ballVertices = new Float32Array( ballVertices );
     ballGeometry.setIndex( ballIndices );
     ballGeometry.setAttribute( 'position', new THREE.BufferAttribute( ballVertices, 3 ) );
-    ballMat = new THREE.MeshBasicMaterial( { color: 0xff4444, wireframe: false } );
+    const ballMat = new THREE.MeshBasicMaterial( { color: 0xff4444, wireframe: false } );
     ball = new THREE.Mesh( ballGeometry, ballMat );
     ball.position.copy(BALL_INIT_POS);
     scene.add( ball );
@@ -629,8 +629,8 @@ function step(delta) {
         velocities[i].add(viscosityAcceleration.clone().multiplyScalar(delta));
     }
 
-    ballIncomingParticleVelos = [];
-    ballContactPoints = [];
+    const ballIncomingParticleVelos = [];
+    const ballContactPoints = [];
 
     // update positions and resolve collisions
     for (let i = 0; i < NUM_PARTICLES; i++) {
